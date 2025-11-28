@@ -9,12 +9,12 @@ from datetime import datetime
 import os
 
 # --- CONFIGURAÇÃO INICIAL (ÍCONE E TÍTULO) ---
-# Tenta usar a logo como ícone da aba se ela existir
-page_icon = "logo.png" if os.path.exists("logo.png") else "🏛️"
+# Usa a logo SÓLIDA para o ícone da aba do navegador
+favicon_path = "logo_pdf.png" if os.path.exists("logo_pdf.png") else "🏛️"
 
 st.set_page_config(
-    page_title="JBS CONTEMPLADAS",
-    page_icon=page_icon,
+    page_title="JBS SNIPER",
+    page_icon=favicon_path,
     layout="wide"
 )
 
@@ -35,11 +35,13 @@ st.markdown(f"""
         border-radius: 6px; 
         font-weight: bold; 
         text-transform: uppercase;
-        padding: 10px;
+        padding: 12px;
+        letter-spacing: 1px;
     }}
     .stButton>button:hover {{
         background-color: #6b5e3d; 
         color: {COLOR_BEIGE};
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }}
     h1, h2, h3 {{color: {COLOR_GOLD} !important; font-family: 'Helvetica', sans-serif;}}
     .stTextInput>div>div>input, .stNumberInput>div>div>input {{
@@ -47,27 +49,28 @@ st.markdown(f"""
         color: white; 
         border: 1px solid {COLOR_GOLD};
     }}
-    /* Ajuste da Tabela */
-    div[data-testid="stDataFrame"] {{
+    /* Ajuste da Tabela e Expander */
+    div[data-testid="stDataFrame"], .streamlit-expanderHeader {{
         border: 1px solid {COLOR_GOLD};
+        background-color: #1c1f26;
     }}
 </style>
 """, unsafe_allow_html=True)
 
-# --- CABEÇALHO ---
-c1, c2 = st.columns([1, 4])
+# --- CABEÇALHO DO APP (Usa logo transparente) ---
+c1, c2 = st.columns([1, 5])
 with c1:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=250) # Aumentei a logo
+    if os.path.exists("logo_app.png"):
+        st.image("logo_app.png", width=220)
     else:
         st.markdown(f"<h1 style='color:{COLOR_GOLD}'>JBS</h1>", unsafe_allow_html=True)
 with c2:
-    st.markdown(f"<h1 style='margin-top: 20px;'>SISTEMA DE OPORTUNIDADES</h1>", unsafe_allow_html=True)
-    st.markdown(f"**JBS Contempladas Consórcios** | Ferramenta Exclusiva")
+    st.markdown(f"<h1 style='margin-top: 15px; margin-bottom: 0px;'>SISTEMA SNIPER</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='margin-top: 0px; color: {COLOR_BEIGE} !important;'>Ferramenta Exclusiva da JBS Contempladas</h3>", unsafe_allow_html=True)
 
-st.markdown(f"<hr style='border: 1px solid {COLOR_GOLD}'>", unsafe_allow_html=True)
+st.markdown(f"<hr style='border: 1px solid {COLOR_GOLD}; margin-top: 0;'>", unsafe_allow_html=True)
 
-# --- FUNÇÕES ---
+# --- FUNÇÕES LÓGICAS ---
 def limpar_moeda(texto):
     if not texto: return 0.0
     texto = str(texto).lower().strip().replace('\xa0', '').replace('&nbsp;', '')
@@ -194,43 +197,36 @@ def processar_combinacoes(cotas, min_cred, max_cred, max_ent, max_parc, max_cust
                         'Admin': admin, 'Status': status, 'IDs': ids,
                         'Crédito Total': soma_cred, 'Entrada Total': soma_ent,
                         'Parcela Total': soma_parc, 
-                        'Custo Real (%)': custo_real, # Mantém decimal para cálculo (0.44)
+                        'Custo Real (%)': custo_real * 100, # MULTIPLICADO POR 100
                         'Detalhes': detalhes
                     })
+                    
                     if len([x for x in combinacoes_validas if x['Admin'] == admin]) > 150: break
                 except StopIteration: break
             if count > max_ops: break
     progress_bar.empty()
     return pd.DataFrame(combinacoes_validas)
 
-# --- PDF CUSTOMIZADO ---
+# --- PDF CUSTOMIZADO (Usa logo SÓLIDA) ---
 class PDF(FPDF):
     def header(self):
-        # Logo no PDF
-        if os.path.exists("logo.png"):
-            # x=10, y=8, w=33 (ajuste conforme necessário)
-            self.image('logo.png', 10, 6, 30)
+        # Fundo Dourado
+        self.set_fill_color(132, 117, 78)
+        self.rect(0, 0, 297, 22, 'F')
         
-        # Fundo do cabeçalho Dourado
-        self.set_fill_color(132, 117, 78) # #84754e
-        # Desenha retângulo (começando um pouco depois da logo para não cobrir se não for transparente)
-        # Se a logo for transparente, pode desenhar por baixo.
-        # Aqui, desenhamos o fundo no topo
-        self.rect(0, 0, 297, 25, 'F') 
-        
-        # Se tiver logo, a gente recoloca ela por cima do fundo (se for PNG transparente)
-        if os.path.exists("logo.png"):
-            self.image('logo.png', 10, 5, 40)
+        # Logo Sólida (Ajuste fino de posição x=5, y=3)
+        if os.path.exists("logo_pdf.png"):
+            self.image('logo_pdf.png', 5, 3, 35)
 
+        # Título Centralizado
         self.set_font('Arial', 'B', 16)
         self.set_text_color(255, 255, 255)
-        # Texto centralizado compensando a logo
-        self.cell(0, 15, 'RELATÓRIO DE OPORTUNIDADES', 0, 1, 'C')
-        self.ln(10)
+        self.set_xy(45, 6) 
+        self.cell(0, 10, 'RELATÓRIO SNIPER DE OPORTUNIDADES', 0, 1, 'L')
+        self.ln(8)
 
 def limpar_emojis(texto):
-    # Remove caracteres fora do padrão ASCII/Latin-1 para não quebrar o PDF
-    return texto.encode('latin-1', 'ignore').decode('latin-1')
+    return texto.encode('latin-1', 'ignore').decode('latin-1').replace("?", "").strip()
 
 def gerar_pdf_final(df):
     pdf = PDF(orientation='L', unit='mm', format='A4')
@@ -252,17 +248,14 @@ def gerar_pdf_final(df):
     # Linhas
     pdf.set_font("Arial", size=8)
     for index, row in df.iterrows():
-        # Limpa emojis do status
         status_clean = limpar_emojis(row['Status'])
-        # Remove emojis como 💎 e 🔥 e deixa só texto
-        status_clean = status_clean.replace("?", "").strip() 
         
         pdf.cell(w[0], 8, limpar_emojis(str(row['Admin'])), 1, 0, 'C')
         pdf.cell(w[1], 8, status_clean, 1, 0, 'C')
         pdf.cell(w[2], 8, f"R$ {row['Crédito Total']:,.2f}", 1, 0, 'R')
         pdf.cell(w[3], 8, f"R$ {row['Entrada Total']:,.2f}", 1, 0, 'R')
         pdf.cell(w[4], 8, f"R$ {row['Parcela Total']:,.2f}", 1, 0, 'R')
-        pdf.cell(w[5], 8, f"{row['Custo Real (%)']*100:.2f}%", 1, 0, 'C')
+        pdf.cell(w[5], 8, f"{row['Custo Real (%)']:.2f}%", 1, 0, 'C')
         
         detalhe = limpar_emojis(row['Detalhes'])
         pdf.cell(w[6], 8, detalhe[:55], 1, 1, 'L')
@@ -271,7 +264,7 @@ def gerar_pdf_final(df):
 
 # --- INTERFACE PRINCIPAL ---
 
-# Inicializa Session State para os dados
+# Session State
 if 'df_resultado' not in st.session_state:
     st.session_state.df_resultado = None
 
@@ -280,26 +273,23 @@ with st.expander("📋 DADOS DO SITE (Colar aqui)", expanded=True):
 
 st.subheader("Filtros JBS")
 c1, c2 = st.columns(2)
-# Formatação no input visual
 min_c = c1.number_input("Crédito Mín (R$)", 640000.0, step=10000.0, format="%.2f")
 max_c = c1.number_input("Crédito Máx (R$)", 710000.0, step=10000.0, format="%.2f")
 max_e = c2.number_input("Entrada Máx (R$)", 280000.0, step=5000.0, format="%.2f")
 max_p = c2.number_input("Parcela Máx (R$)", 4500.0, step=100.0, format="%.2f")
 max_k = st.slider("Custo Máx (%)", 0.0, 1.0, 0.55, 0.01)
 
-# BOTÃO DE PROCESSAR
 if st.button("🔍 LOCALIZAR OPORTUNIDADES"):
     if texto_site:
         cotas = extrair_dados_universal(texto_site)
         if cotas:
-            # Processa e SALVA NO SESSION STATE
             st.session_state.df_resultado = processar_combinacoes(cotas, min_c, max_c, max_e, max_p, max_k)
         else:
-            st.error("Nenhuma cota lida. Verifique os dados.")
+            st.error("Nenhuma cota identificada.")
     else:
         st.error("Cole os dados primeiro.")
 
-# EXIBIÇÃO DO RESULTADO (Persistente)
+# EXIBIÇÃO DE RESULTADOS
 if st.session_state.df_resultado is not None:
     df_show = st.session_state.df_resultado
     
@@ -307,7 +297,6 @@ if st.session_state.df_resultado is not None:
         df_show = df_show.sort_values(by='Custo Real (%)')
         st.success(f"{len(df_show)} Oportunidades Encontradas!")
         
-        # Tabela na tela
         st.dataframe(
             df_show,
             column_config={
@@ -318,32 +307,33 @@ if st.session_state.df_resultado is not None:
             }, hide_index=True
         )
         
-        col_down1, col_down2 = st.columns(2)
+        c_pdf, c_xls = st.columns(2)
         
-        # 1. DOWNLOAD PDF
+        # PDF
         try:
             pdf_bytes = gerar_pdf_final(df_show)
-            col_down1.download_button("📄 Baixar PDF (Paisagem)", pdf_bytes, "JBS_Relatorio.pdf", "application/pdf")
+            c_pdf.download_button("📄 Baixar PDF (Relatório)", pdf_bytes, "JBS_Sniper_Relatorio.pdf", "application/pdf")
         except Exception as e:
-            col_down1.error(f"Erro PDF: {e}")
+            c_pdf.error(f"Erro no PDF: {e}")
 
-        # 2. DOWNLOAD EXCEL (FORMATADO)
+        # EXCEL
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-            df_show.to_excel(writer, index=False, sheet_name='JBS')
+            df_excel = df_show.copy()
+            df_excel['Custo Real (%)'] = df_excel['Custo Real (%)'] / 100
+            
+            df_excel.to_excel(writer, index=False, sheet_name='JBS')
             wb = writer.book
             ws = writer.sheets['JBS']
             
-            # Formatos
             fmt_money = wb.add_format({'num_format': 'R$ #,##0.00'})
             fmt_perc = wb.add_format({'num_format': '0.00%'})
             
-            # Aplica formatos
-            ws.set_column('C:E', 18, fmt_money) # Crédito, Entrada, Parcela
-            ws.set_column('F:F', 12, fmt_perc)  # Custo %
-            ws.set_column('G:G', 50)            # Detalhes
+            ws.set_column('C:E', 18, fmt_money)
+            ws.set_column('F:F', 12, fmt_perc)
+            ws.set_column('G:G', 50)
             
-        col_down2.download_button("📊 Baixar Excel (Formatado)", buf.getvalue(), "JBS_Calculo.xlsx")
+        c_xls.download_button("📊 Baixar Excel (Cálculo)", buf.getvalue(), "JBS_Sniper_Calculo.xlsx")
         
     else:
-        st.warning("Nenhuma oportunidade encontrada com estes filtros.")
+        st.warning("Nenhuma oportunidade com estes filtros.")
