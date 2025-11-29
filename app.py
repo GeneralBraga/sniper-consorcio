@@ -62,6 +62,7 @@ def extrair_dados_universal(texto_copiado, tipo_selecionado):
     admins_regex = r'(?i)(bradesco|santander|itaú|itau|porto|caixa|banco do brasil|bb|rodobens|embracon|ancora|âncora|mycon|sicredi|sicoob|mapfre|hs|yamaha|zema|bancorbrás|bancorbras|servopa)'
     
     partes = re.split(f'({admins_regex})', texto_limpo)
+    
     blocos = []
     for i in range(1, len(partes), 2):
         if i+1 < len(partes):
@@ -75,85 +76,85 @@ def extrair_dados_universal(texto_copiado, tipo_selecionado):
         if len(bloco) < 20: continue
         bloco_lower = bloco.lower()
         
-        # 1. Admin
+        # Admin
         match_admin = re.search(admins_regex, bloco_lower)
         admin_encontrada = match_admin.group(0).upper() if match_admin else "OUTROS"
         if admin_encontrada == "OUTROS" and "r$" not in bloco_lower: continue
 
-        # 2. Tipo
+        # Tipo
         tipo_cota = "Geral"
         if "imóvel" in bloco_lower or "imovel" in bloco_lower: tipo_cota = "Imóvel"
         elif "automóvel" in bloco_lower or "veículo" in bloco_lower: tipo_cota = "Automóvel"
         elif "caminhão" in bloco_lower: tipo_cota = "Pesados"
         if tipo_cota == "Geral": tipo_cota = tipo_selecionado
 
-        # 3. Valores
+        # Valores
         credito = 0.0
         entrada = 0.0
         
-        # Pega todos os valores monetários do bloco
-        valores = re.findall(r'R\$\s?([\d\.,]+)', bloco)
-        vals_float = sorted([limpar_moeda(v) for v in valores], reverse=True)
+        # Regex Rótulos
+        match_cred = re.search(r'(?:crédito|credito|bem|valor)[^\d\n]*?R\$\s?([\d\.,]+)', bloco_lower)
+        match_ent = re.search(r'(?:entrada|ágio|agio|quero|pago)[^\d\n]*?R\$\s?([\d\.,]+)', bloco_lower)
         
-        # Lógica Piffer: Crédito é o maior, Entrada é o segundo maior
-        if len(vals_float) >= 1: credito = vals_float[0]
-        if len(vals_float) >= 2: 
-            # Validação simples: Entrada não pode ser igual ao crédito (erro de leitura) e deve ser > 5%
-            if vals_float[1] < credito and vals_float[1] > (credito * 0.05):
-                entrada = vals_float[1]
+        if match_cred: credito = limpar_moeda(match_cred.group(1))
+        if match_ent: entrada = limpar_moeda(match_ent.group(1))
+        
+        # Regex Posição (Se falhar rótulos)
+        if credito == 0:
+            valores = re.findall(r'R\$\s?([\d\.,]+)', bloco)
+            vals_float = sorted([limpar_moeda(v) for v in valores], reverse=True)
+            if len(vals_float) >= 1: credito = vals_float[0]
+            if len(vals_float) >= 2 and entrada == 0: 
+                if vals_float[1] > (credito * 0.05): entrada = vals_float[1]
 
-        # 4. PARCELA E PRAZO (A MIRA LASER PARA O SEU PRINT)
+        # --- PARCELA E PRAZO (A CORREÇÃO PRINCIPAL V49) ---
         saldo_devedor = 0.0
         parcela_teto = 0.0
         prazo_final = 0
         
-        # Regex Específica para o print da Piffer: "169X R$ 407,00"
-        # Captura: (Prazo) (X ou x) (R$) (Valor)
-        # O \s* permite espaço ou não entre o número e o X
-        match_piffer = re.findall(r'(\d+)\s*[xX]\s*R\$\s?([\d\.,]+)', bloco)
+        # Regex Potente: Captura "169X", "169 X", "169x"
+        # O segredo é o `\s*` (espaço opcional) entre número e X
+        regex_parcela_v49 = r'(\d{1,3})\s*[xX]\s*R?\$\s?([\d\.,]+)'
+        todas_parcelas = re.findall(regex_parcela_v49, bloco, re.IGNORECASE)
         
-        if match_piffer:
-            for pz_str, vlr_str in match_piffer:
+        # Fallback invertido (R$ Y em X meses)
+        if not todas_parcelas:
+             todas_parcelas_inv = re.findall(r'R?\$\s?([\d\.,]+)\s*(?:em|x|durante)\s*(\d{1,3})', bloco)
+             if todas_parcelas_inv: todas_parcelas = [(p[1], p[0]) for p in todas_parcelas_inv]
+
+        if todas_parcelas:
+            for pz_str, vlr_str in todas_parcelas:
                 pz = int(pz_str)
                 vlr = limpar_moeda(vlr_str)
+                if pz > 360 or vlr < 50: continue 
                 
-                # Filtra lixo (ex: prazos impossíveis)
-                if pz > 400 or pz < 2: continue 
-                
+                # Se achou, CALCULA O SALDO NA HORA
                 saldo_devedor += (pz * vlr)
                 if vlr > parcela_teto: 
                     parcela_teto = vlr
-                    prazo_final = pz
-        else:
-            # Fallback para Top Contempladas (Rótulo)
-            match_top = re.search(r'(?:parcelas|prazo).*?(\d+).*?R\$\s?([\d\.,]+)', bloco_lower)
-            if match_top:
-                prazo_final = int(match_top.group(1))
-                parcela_teto = limpar_moeda(match_top.group(2))
-                saldo_devedor = prazo_final * parcela_teto
-
-        # 5. CONSOLIDAÇÃO (SEM INVENÇÃO)
+                    prazo_final = pz # Pega o prazo da maior parcela
+        
+        # --- PREENCHIMENTO OBRIGATÓRIO ---
         if credito > 0 and entrada > 0:
             
-            # Se a leitura da parcela falhou (saldo 0), a gente ZERA para o usuário ver que falhou
-            # Não inventamos mais dados.
+            # Se não leu saldo (porque a regex falhou), estima para não zerar
             if saldo_devedor == 0:
-                # Tenta uma última cartada: Saldo = Crédito - Entrada? (Só pra não perder a cota)
-                # Mas deixa parcela 0 para indicar que precisa consultar
-                pass 
+                taxa_admin = 1.25 # Média de mercado
+                saldo_devedor = (credito * taxa_admin) - entrada
+                
+            # Se não leu prazo, estima para não zerar
+            if parcela_teto == 0:
+                prazo_padrao = 180 if tipo_cota == "Imóvel" else 80
+                parcela_teto = saldo_devedor / prazo_padrao
+                prazo_final = prazo_padrao
 
             custo_total = entrada + saldo_devedor
             
             if credito > 3000: 
                 lista_cotas.append({
-                    'ID': id_cota, 
-                    'Admin': admin_encontrada, 
-                    'Tipo': tipo_cota,
-                    'Crédito': credito, 
-                    'Entrada': entrada,
-                    'Parcela': parcela_teto, 
-                    'Saldo': saldo_devedor, 
-                    'CustoTotal': custo_total,
+                    'ID': id_cota, 'Admin': admin_encontrada, 'Tipo': tipo_cota,
+                    'Crédito': credito, 'Entrada': entrada,
+                    'Parcela': parcela_teto, 'Saldo': saldo_devedor, 'CustoTotal': custo_total,
                     'Prazo': prazo_final,
                     'EntradaPct': (entrada/credito) if credito else 0
                 })
@@ -204,21 +205,20 @@ def processar_combinacoes(cotas, min_cred, max_cred, max_ent, max_parc, max_cust
                     soma_saldo = sum(c['Saldo'] for c in combo)
                     custo_total_exibicao = soma_ent + soma_saldo
                     
-                    # Se não tem saldo lido, usa fallback matemático apenas para o filtro de custo não quebrar
-                    if soma_saldo == 0:
-                        custo_real = 0 # Assume neutro para mostrar na tabela como alerta
+                    # Cálculo Prazo (Proteção Zero)
+                    if soma_parc > 0:
+                        prazo_medio = int(soma_saldo / soma_parc)
                     else:
-                        custo_real = (custo_total_exibicao / soma_cred) - 1
-                    
+                        prazo_medio = 80 
+                        soma_parc = soma_saldo / 80
+
+                    custo_real = (custo_total_exibicao / soma_cred) - 1
                     if custo_real > max_custo: continue
                     
                     ids = " + ".join([str(c['ID']) for c in combo])
                     detalhes = " || ".join([f"[ID {c['ID']}] 💰 CR: R$ {c['Crédito']:,.0f}" for c in combo])
                     tipo_final = combo[0]['Tipo']
                     
-                    # Prazo Ponderado Real
-                    prazo_medio = int(soma_saldo / soma_parc) if soma_parc > 0 else 0
-
                     status = "⚠️ PADRÃO"
                     if custo_real <= 0.20: status = "💎 OURO"
                     elif custo_real <= 0.35: status = "🔥 IMPERDÍVEL"
@@ -234,7 +234,7 @@ def processar_combinacoes(cotas, min_cred, max_cred, max_ent, max_parc, max_cust
                         'IDS': ids,
                         'CRÉDITO TOTAL': soma_cred,
                         'ENTRADA TOTAL': soma_ent,
-                        'ENTRADA %': entrada_pct * 100,
+                        'ENTRADA %': (soma_ent/soma_cred) * 100,
                         'SALDO DEVEDOR': soma_saldo,
                         'CUSTO TOTAL': custo_total_exibicao,
                         'PRAZO': prazo_medio,
