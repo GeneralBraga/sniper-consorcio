@@ -5,6 +5,7 @@ import re
 import itertools
 from io import BytesIO
 from fpdf import FPDF
+from datetime import datetime
 import os
 
 # --- CONFIGURAÇÃO ---
@@ -34,8 +35,8 @@ with c1:
     if os.path.exists("logo_app.png"): st.image("logo_app.png", width=220)
     else: st.markdown(f"<h1 style='color:{COLOR_GOLD}'>JBS</h1>", unsafe_allow_html=True)
 with c2:
-    st.markdown(f"<h1 style='margin-top: 15px; margin-bottom: 0px;'>SISTEMA SNIPER V72</h1>", unsafe_allow_html=True)
-    st.markdown(f"<h3 style='margin-top: 0px; color: {COLOR_BEIGE} !important;'>Ferramenta Blindada (Correção Definitiva)</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='margin-top: 15px; margin-bottom: 0px;'>SISTEMA SNIPER</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='margin-top: 0px; color: {COLOR_BEIGE} !important;'>Ferramenta Exclusiva da JBS Contempladas</h3>", unsafe_allow_html=True)
 st.markdown(f"<hr style='border: 1px solid {COLOR_GOLD}; margin-top: 0;'>", unsafe_allow_html=True)
 
 # --- FUNÇÕES ---
@@ -48,100 +49,76 @@ def limpar_moeda(texto):
         if ',' in texto and '.' in texto: return float(texto.replace('.', '').replace(',', '.'))
         elif ',' in texto: return float(texto.replace(',', '.'))
         elif '.' in texto:
-            if len(texto.split('.')[1]) == 2: return float(texto)
-            return float(texto.replace('.', ''))
+             if len(texto.split('.')[1]) == 2: return float(texto)
+             return float(texto.replace('.', ''))
         return float(texto)
     except: return 0.0
 
 def extrair_dados_universal(texto_copiado, tipo_selecionado):
     lista_cotas = []
+    # Limpa linhas vazias
+    linhas = [line.strip() for line in texto_copiado.split('\n') if line.strip()]
     
-    # 1. LISTA MANUAL DE ADMINS (EXATA DO PRINT) - ORDEM DO MAIOR P/ MENOR
-    admins_fix = [
-        'CAIXA ECONÔMICA FEDERAL', 'PORTO SEGURO - UNICRED', 'PORTO SEGURO VP', 'REPASSE (CAPITAL DE GIRO)',
-        'CONSÓRCIO ARAUCÁRIA', 'UNIÃO CATARINENSE', 'UNIÃO LONDRINA', 'UNICOOB/SICOOB', 'SICOOB UNICOOB',
-        'BANCO DO BRASIL', 'SICOOB PONTA', 'PORTO SEGURO', 'BSB DISBRAVE', 'GM - CHEVROLET', 'PRIMO ROSSI',
-        'BANCORBRÁS', 'TRADIÇÃO', 'BRADESCO', 'EMBRACON', 'RODOBENS', 'SANTANDER', 'SERVOPA', 'UNIFISA',
-        'BREITKOPF', 'ARAUCÁRIA', 'BANRISUL', 'CANOPUS', 'ADEMICON', 'BRQUALY', 'AGIBANK', 'SICREDI',
-        'YAMAHA', 'MAPFRE', 'MAGALU', 'VOLVO', 'HONDA', 'GLOBO', 'GAZIN', 'SCANIA', 'REMAZA', 'RANDON',
-        'VOLKSWAGEN', 'ITAU - A', 'ITAÚ - A', 'ITAU - M', 'ITAÚ - M', 'ITAU - P', 'ITAÚ - P', 
-        'ITAÚ', 'ITAU', 'ÂNCORA', 'ANCORA', 'ALPHA VP', 'ALPHA', 'MYCON', 'MAGGI', 'IVECO', 
-        'GROSCON', 'FORD', 'CAOA', 'ZEMA', 'RECON', 'HS', 'BB', 'CAIXA'
-    ]
+    # Regex de Admin (Gatilho)
+    admins_regex = r'(?i)(bradesco|santander|itaú|itau|porto|caixa|banco do brasil|bb|rodobens|embracon|ancora|âncora|mycon|sicredi|sicoob|mapfre|hs|yamaha|zema|bancorbrás|bancorbras|servopa|disal|volkswagen|chevrolet|toyota|bancorbras|cnp|magalu|serello|becker|colombo|spengler|unicoob)'
 
-    # 2. TRATAMENTO "TRATOR" (SEM REGEX COMPLEXO)
-    # Separa "BANCOR$" -> "BANCO R$" na força bruta
-    texto_tratado = texto_copiado
-    
-    # Normaliza quebras se estiver tudo na mesma linha
-    if "\n" not in texto_tratado and len(texto_tratado) > 200:
-        texto_tratado = texto_tratado.replace("R$", " R$") # Garante espaço no R$
-        
-    for adm in admins_fix:
-        # Substituição manual Case Insensitive
-        # Procura a string da admin e garante quebra antes e espaço depois
-        pattern = re.compile(re.escape(adm), re.IGNORECASE)
-        # Se estiver colado com R$ (ex: ITAÚR$), separa
-        texto_tratado = pattern.sub(lambda m: "\n" + m.group(0).upper() + " ", texto_tratado)
-
-    # 3. LEITURA LINHA A LINHA
-    linhas = [line.strip() for line in texto_tratado.split('\n') if line.strip()]
-    
     cota_temp = {}
     id_counter = 1
 
+    # Lógica Sequencial (Máquina de Estados)
     for i, linha in enumerate(linhas):
-        linha_upper = linha.upper()
+        linha_lower = linha.lower()
         
-        # Identifica Admin
-        admin_encontrada = None
-        for adm in admins_fix:
-            if adm in linha_upper:
-                admin_encontrada = adm
-                break
+        # 1. Detecta Admin (Início de Cota)
+        match_admin = re.search(admins_regex, linha_lower)
         
-        # Se achou Admin, é nova cota
-        if admin_encontrada and len(linha) < 80:
-            # Salva anterior
+        # Se achou Admin E a linha é curta (para não pegar texto aleatório), começa nova cota
+        if match_admin and len(linha) < 60:
+            # Salva a anterior se estiver completa (ou semi-completa)
             if cota_temp and cota_temp.get('Crédito', 0) > 0:
+                # Fallback de cálculo se faltou dado
                 if cota_temp.get('Saldo') == 0:
-                    cota_temp['Saldo'] = max(0, (cota_temp['Crédito'] * 1.25) - cota_temp.get('Entrada', 0))
-                    prazo_est = 180 if "Imóvel" in tipo_selecionado else 80
-                    cota_temp['Parcela'] = cota_temp['Saldo'] / prazo_est
-                    cota_temp['Prazo'] = prazo_est
+                     cota_temp['Saldo'] = max(0, (cota_temp['Crédito'] * 1.25) - cota_temp.get('Entrada', 0))
+                     prazo_est = 180 if "Imóvel" in tipo_selecionado else 80
+                     cota_temp['Parcela'] = cota_temp['Saldo'] / prazo_est
+                     cota_temp['Prazo'] = prazo_est
+                
                 cota_temp['CustoTotal'] = cota_temp.get('Entrada', 0) + cota_temp['Saldo']
                 if cota_temp['Crédito'] > 0:
                     cota_temp['EntradaPct'] = cota_temp.get('Entrada', 0) / cota_temp['Crédito']
+                
                 lista_cotas.append(cota_temp)
 
-            # Nova Cota
+            # Inicia Nova Cota
             cota_temp = {
                 'ID': id_counter,
-                'Admin': admin_encontrada,
+                'Admin': match_admin.group(0).upper(),
                 'Tipo': tipo_selecionado,
                 'Crédito': 0.0, 'Entrada': 0.0, 'Parcela': 0.0, 'Saldo': 0.0, 'Prazo': 0
             }
             id_counter += 1
             
-            # Tenta pegar crédito na mesma linha
-            vals = re.findall(r'R\$\s?([\d\.,]+)', linha)
-            if vals: cota_temp['Crédito'] = limpar_moeda(vals[0])
+            # Tenta achar crédito na mesma linha (Piffer)
+            vals_linha = re.findall(r'R\$\s?([\d\.,]+)', linha)
+            if vals_linha: cota_temp['Crédito'] = limpar_moeda(vals_linha[0])
 
-        # Se estamos numa cota, busca valores
+        # Se estamos dentro de uma cota, procura valores nas linhas seguintes
         elif cota_temp:
-            # Crédito
+            # Crédito (Se ainda for 0)
             if cota_temp['Crédito'] == 0 and "R$" in linha:
+                # Se a linha só tem dinheiro, provavelmente é o crédito (Top Contempladas)
                 val = limpar_moeda(linha)
                 if val > 5000: cota_temp['Crédito'] = val
             
             # Entrada
-            if "entrada" in linha.lower():
+            if "entrada" in linha_lower:
                 val = limpar_moeda(linha)
-                if val == 0 and i+1 < len(linhas):
+                if val == 0 and i+1 < len(linhas): # Tenta próxima linha
                     val = limpar_moeda(linhas[i+1])
                 if val > 0: cota_temp['Entrada'] = val
             
-            # Parcela / Prazo
+            # Parcela (Lógica Híbrida)
+            # 1. Tenta regex "31 x R$ 1.000"
             match_parc = re.search(r'(\d{1,3})\s*[xX]\s*R?\$\s?([\d\.,]+)', linha)
             if match_parc:
                 p = int(match_parc.group(1))
@@ -150,8 +127,11 @@ def extrair_dados_universal(texto_copiado, tipo_selecionado):
                     cota_temp['Prazo'] = p
                     cota_temp['Parcela'] = v
                     cota_temp['Saldo'] = p * v
-            elif "parcela" in linha.lower() and i+1 < len(linhas):
-                match_prox = re.search(r'(\d{1,3})\s*[xX]\s*R?\$\s?([\d\.,]+)', linhas[i+1])
+            
+            # 2. Tenta rótulo "Parcelas:" e valor na próxima linha
+            elif "parcela" in linha_lower and i+1 < len(linhas):
+                prox_linha = linhas[i+1]
+                match_prox = re.search(r'(\d{1,3})\s*[xX]\s*R?\$\s?([\d\.,]+)', prox_linha)
                 if match_prox:
                     p = int(match_prox.group(1))
                     v = limpar_moeda(match_prox.group(2))
@@ -159,13 +139,13 @@ def extrair_dados_universal(texto_copiado, tipo_selecionado):
                     cota_temp['Parcela'] = v
                     cota_temp['Saldo'] = p * v
 
-    # Salva última
+    # Salva a última
     if cota_temp and cota_temp.get('Crédito', 0) > 0:
         if cota_temp.get('Saldo') == 0:
-            cota_temp['Saldo'] = max(0, (cota_temp['Crédito'] * 1.25) - cota_temp.get('Entrada', 0))
-            prazo_est = 180 if "Imóvel" in tipo_selecionado else 80
-            cota_temp['Parcela'] = cota_temp['Saldo'] / prazo_est
-            cota_temp['Prazo'] = prazo_est
+             cota_temp['Saldo'] = max(0, (cota_temp['Crédito'] * 1.25) - cota_temp.get('Entrada', 0))
+             prazo_est = 180 if "Imóvel" in tipo_selecionado else 80
+             cota_temp['Parcela'] = cota_temp['Saldo'] / prazo_est
+             cota_temp['Prazo'] = prazo_est
         cota_temp['CustoTotal'] = cota_temp.get('Entrada', 0) + cota_temp['Saldo']
         cota_temp['EntradaPct'] = cota_temp.get('Entrada', 0) / cota_temp['Crédito']
         lista_cotas.append(cota_temp)
